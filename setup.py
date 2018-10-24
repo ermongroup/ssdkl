@@ -1,0 +1,25 @@
+from setuptools import setup, find_packages
+
+setup(name='semisup',
+      version='0.0.1',
+      description='Semi-supervised Deep Kernel Learning',
+      url='https://github.com/ermongroup/semisup',
+      author='Neal Jean, Michael Xie',
+      author_email='nealjean@stanford.edu',
+      packages=find_packages(exclude=['tests']),
+      install_requires=[
+          'Click==7.0',
+          'joblib==0.12.5',
+          'Lasagne==0.1',
+          'numpy==1.15.2',
+          'pandas==0.23.4',
+          'PyYAML==3.13',
+          'scikit-learn==0.20.0',
+          'scipy==1.1.0',
+          'sklearn==0.0',
+          'tensorflow==0.12.1',
+          'Theano==0.7.0',
+          'torch==0.4.1',
+          'torchvision==0.2.1',
+      ],
+)

@@ -1,0 +1,68 @@
+# Type of model to use: dkl, semisup, vat, semisup_withlocs
+model: ['dkl', 'semisup', 'vat', 'coreg']
+use_cnn: 0 # 0: NN_UCI, 1: CNN_MNIST
+# 'squared_exponential' or 'square_polynomial' (not 'squared')
+kernel: squared_exponential
+
+# True if ready to run with no modifications (e.g., saved by experiment)
+final: false
+verbose: true
+
+# Dataset
+# UCI: blog, buzz, ctslice, electric, parkinsons, protein, skillcraft
+dataset: ['blog', 'buzz', 'ctslice', 'electric', 'elevators', 'parkinsons', 'protein', 'skillcraft']
+
+# Places to find/save things
+###################### CHANGE THIS ####################################
+data_dir: /path/to/data/
+results_dir: /path/to/output
+#######################################################################
+
+# Training parameters
+num_train: [100, 300]
+max_iters: 200
+num_trials: 10
+batch_unlabeled: 1000
+
+# Optimizer parameters
+optimizer_type: adam
+momentum: 0.9
+beta1: 0.9
+beta2: 0.999
+epsilon: 0.00000001
+
+# Initialization for GP hyperparameters
+sigma_l: 1
+sigma_f: 1
+sigma_n: 1
+alpha: 1
+
+# Initialization for VAT hyperparameters
+layer_sizes: 100-50-50-2-1
+vat_epsilon: 2.0
+num_power_iter: 1
+
+# Coreg hyperparameters
+k1: 3
+k2: 3
+p1: 2
+p2: 5
+pool_size: 100
+
+# GP and NN learning rates
+lr_gp: 0.1
+lr_nn: 0.001
+lr_decay: 0.9
+lr_decay_every: 50
+
+# What to save
+save_results: true
+save_every: 1 # save models every X iterations
+max_models_to_keep: 2
+
+# GPU options
+use_gpu: false
+gpu_fraction: 1
+
+# timestamp
+use_timestamp: false
