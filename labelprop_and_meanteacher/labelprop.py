@@ -69,7 +69,8 @@ def label_propagation_regression(X_l, y_l, X_u, X_val, y_val, sigma_2):
 def run_dataset(dataset):
     dataset_dir = os.path.join(config['data_dir'], dataset)
     results_dir = 'results_labelprop'
-    os.makedirs(results_dir)
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
     results_path = os.path.join(results_dir, "{}.csv".format(dataset))
     fold_results_path = os.path.join(results_dir, "{}_folds.csv".format(dataset))
 

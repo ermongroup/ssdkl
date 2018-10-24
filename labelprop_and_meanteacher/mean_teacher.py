@@ -189,7 +189,8 @@ def optimize_mean_teacher(X_labeled, y_labeled, X_unlabeled, X_val, y_val,
 def run_dataset(dataset):
     dataset_dir = os.path.join(config['data_dir'], dataset)
     results_base = 'results_mean_teacher'
-    os.makedirs(results_base)
+    if not os.path.exists(results_base):
+        os.makedirs(results_base)
     results_path = os.path.join(results_base, "{}.csv".format(dataset))
     fold_results_path = os.path.join(results_base, "{}_folds.csv".format(dataset))
 
