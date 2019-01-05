@@ -1,8 +1,7 @@
-import time
+from time import time
 import os
 
 import numpy as np
-from scipy.spatial.distance import minkowski
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.utils import shuffle
 from sklearn.metrics import mean_squared_error
@@ -14,7 +13,7 @@ def load_data(data_dir):
     """
     X = np.load(os.path.join(data_dir, 'X.npy'))
     y = np.load(os.path.join(data_dir, 'y.npy'))
-    return X, y
+    return X, y.reshape(-1, 1)
 
 
 class Coreg():
@@ -22,10 +21,8 @@ class Coreg():
     Instantiates a CoReg regressor.
     """
     def __init__(self, k1=3, k2=3, p1=2, p2=5, max_iters=100, pool_size=100):
-        self.k1 = k1
-        self.k2 = k2
-        self.p1 = p1
-        self.p2 = p2
+        self.k1, self.k2 = k1, k2  # number of neighbors
+        self.p1, self.p2 = p1, p2  # distance metrics
         self.max_iters = max_iters
         self.pool_size = pool_size
         self.h1 = KNeighborsRegressor(n_neighbors=self.k1, p=self.p1)
@@ -37,35 +34,7 @@ class Coreg():
         """
         Adds data and splits into labeled and unlabeled.
         """
-        self.X, y = load_data(data_dir)
-        self.y = y.reshape(-1, 1)
-
-    def split_data(self, random_state=-1, num_labeled=100, num_test=1000):
-        """
-        Shuffles data and splits it into train, test, and unlabeled sets.
-        """
-        if random_state >= 0:
-            self.X_shuffled, self.y_shuffled, self.shuffled_indices = shuffle(
-                self.X, self.y, range(self.y.size), random_state=random_state)
-        else:
-            self.X_shuffled = self.X[:]
-            self.y_shuffled = self.y[:]
-            self.shuffled_indices = range(self.y.size)
-        # Initial labeled, test, and unlabeled sets
-        test_end = num_labeled + num_test
-        self.X_labeled = self.X_shuffled[:num_labeled]
-        self.y_labeled = self.y_shuffled[:num_labeled]
-        self.X_test = self.X_shuffled[num_labeled:test_end]
-        self.y_test = self.y_shuffled[num_labeled:test_end]
-        self.X_unlabeled = self.X_shuffled[test_end:]
-        self.y_unlabeled = self.y_shuffled[test_end:]
-        # Up-to-date training sets and unlabeled set
-        self.L1_X = self.X_labeled[:]
-        self.L1_y = self.y_labeled[:]
-        self.L2_X = self.X_labeled[:]
-        self.L2_y = self.y_labeled[:]
-        self.U_X = self.X_unlabeled[:]
-        self.U_y = self.y_unlabeled[:]
+        self.X, self.y = load_data(data_dir)
 
     def run_trials(self, num_train=100, trials=10, verbose=False):
         """
@@ -76,52 +45,57 @@ class Coreg():
         self._initialize_metrics()
         self.trial = 0
         while self.trial < self.num_trials:
-            t0 = time.time()
-            print 'Starting trial {}:'.format(self.trial + 1)
-            self.split_data(
+            t0 = time()
+            print('Starting trial {}:'.format(self.trial + 1))
+            self.train(
                 random_state=(self.trial+self.num_train),
-                num_labeled=self.num_train, num_test=1000)
-            self.original_indices[self.trial,:] = self.shuffled_indices[:1000]
-            self.train(verbose, True)
-            t1 = time.time()
-            print 'Finished trial {}: {} seconds elapsed\n'.format(
-                self.trial + 1, t1 - t0)
+                num_labeled=self.num_train, num_test=1000, verbose=verbose,
+                store_results=True)
+            print('Finished trial {}: {:0.2f}s elapsed\n'.format(
+                self.trial + 1, time() - t0))
             self.trial += 1
 
-    def train(self, verbose=False, store_results=False):
+    def train(self, random_state=-1, num_labeled=100, num_test=1000,
+              verbose=False, store_results=False):
         """
         Trains the CoReg regressor.
         """
-        t0 = time.time()
+        t0 = time()
+        self._split_data(random_state, num_labeled, num_test)
         self._fit_and_evaluate(verbose)
         if store_results:
             self._store_results(0)
         self._get_pool()
         if verbose:
-            t1 = time.time()
-            print 'Trained initial regressors: {:0.4f} seconds\n'.format(t1-t0)
-        for t in range(1, self.max_iters):
-            if verbose:
-                t1 = time.time()
-                print 'Started iteration {}: {:0.4f} seconds'.format(t, t1-t0)
-            self._find_points_to_add()
-            added = self._add_points()
-            if added:
-                self._fit_and_evaluate(verbose)
-                if store_results:
-                    self._store_results(t)
-                self._remove_from_unlabeled()
-                self._get_pool()
-            else:
+            print('Initialized h1, h2: {:0.2f}s\n'.format(time()-t0))
+        for t in range(1, self.max_iters+1):
+            stop_training = self._run_iteration(t, t0, verbose, store_results)
+            if stop_training:
                 if verbose:
-                    t1 = time.time()
-                    print 'Done in {} iterations: {:0.4f} seconds'.format(
-                        t, t1-t0)
+                    print('Done in {} iterations: {:0.2f}s'.format(t, time()-t0))
                 break
         if verbose:
-            t1 = time.time()
-            print 'Finished all {} iterations: {:0.4f} seconds'.format(
-                t+1, t1-t0)
+            print('Finished {} iterations: {:0.2f}s'.format(t, time()-t0))
+
+    def _run_iteration(self, t, t0, verbose=False, store_results=False):
+        """
+        Run t-th iteration of co-training, returns stop_training=True if
+        no more unlabeled points are added to label sets.
+        """
+        stop_training = False
+        if verbose:
+            print('Started iteration {}: {:0.2f}s'.format(t, time()-t0))
+        self._find_points_to_add()
+        added = self._add_points()
+        if added:
+            self._fit_and_evaluate(verbose)
+            if store_results:
+                self._store_results(t)
+            self._remove_from_unlabeled()
+            self._get_pool()
+        else:
+            stop_training = True
+        return stop_training
 
     def _add_points(self):
         """
@@ -159,13 +133,12 @@ class Coreg():
         for idx_u, x_u in enumerate(self.U_X_pool):
             # Make prediction
             x_u = x_u.reshape(1, -1)
-            y_u = self.U_y_pool[idx_u].reshape(1, -1)
-            y_u_hat = h.predict(x_u)
+            y_u_hat = h.predict(x_u).reshape(1, -1)
             # Compute neighbors
             omega = h.kneighbors(x_u, return_distance=False)[0]
             # Retrain regressor after adding unlabeled point
             X_temp = np.vstack((L_X, x_u))
-            y_temp = np.vstack((L_y, y_u))
+            y_temp = np.vstack((L_y, y_u_hat))  # use predicted y_u_hat
             h_temp.fit(X_temp, y_temp)
             delta = self._compute_delta(omega, L_X, L_y, h, h_temp)
             deltas[idx_u] = delta
@@ -181,29 +154,23 @@ class Coreg():
         test1_hat = self.h1.predict(self.X_test)
         test2_hat = self.h2.predict(self.X_test)
         test_hat = 0.5 * (test1_hat + test2_hat)
-        self.mse1_train = mean_squared_error(
-            train1_hat, self.y_labeled)
-        self.mse1_test = mean_squared_error(
-            test1_hat, self.y_test)
-        self.mse2_train = mean_squared_error(
-            train2_hat, self.y_labeled)
-        self.mse2_test = mean_squared_error(
-            test2_hat, self.y_test)
-        self.mse_train = mean_squared_error(
-            train_hat, self.y_labeled)
-        self.mse_test = mean_squared_error(
-            test_hat, self.y_test)
+        self.mse1_train = mean_squared_error(train1_hat, self.y_labeled)
+        self.mse1_test = mean_squared_error(test1_hat, self.y_test)
+        self.mse2_train = mean_squared_error(train2_hat, self.y_labeled)
+        self.mse2_test = mean_squared_error(test2_hat, self.y_test)
+        self.mse_train = mean_squared_error(train_hat, self.y_labeled)
+        self.mse_test = mean_squared_error(test_hat, self.y_test)
         if verbose:
-            print 'MSEs:'
-            print '  KNN1:'
-            print '    Train: {:0.4f}'.format(self.mse1_train)
-            print '    Test: {:0.4f}'.format(self.mse1_test)
-            print '  KNN2:'
-            print '    Train: {:0.4f}'.format(self.mse2_train)
-            print '    Test: {:0.4f}'.format(self.mse2_test)
-            print '  Combined:'
-            print '    Train: {:0.4f}'.format(self.mse_train)
-            print '    Test: {:0.4f}\n'.format(self.mse_test)
+            print('MSEs:')
+            print('  KNN1:')
+            print('    Train: {:0.4f}'.format(self.mse1_train))
+            print('    Test : {:0.4f}'.format(self.mse1_test))
+            print('  KNN2:')
+            print('    Train: {:0.4f}'.format(self.mse2_train))
+            print('    Test : {:0.4f}'.format(self.mse2_test))
+            print('  Combined:')
+            print('    Train: {:0.4f}'.format(self.mse_train))
+            print('    Test : {:0.4f}\n'.format(self.mse_test))
 
     def _find_points_to_add(self):
         """
@@ -211,6 +178,8 @@ class Coreg():
         """
         self.to_add = {'x1': None, 'y1': None, 'idx1': None,
                        'x2': None, 'y2': None, 'idx2': None}
+        # Keep track of added idxs
+        added_idxs = []
         for idx_h in [1, 2]:
             if idx_h == 1:
                 h = self.h1
@@ -222,27 +191,25 @@ class Coreg():
                 L_X, L_y = self.L2_X, self.L2_y
             deltas = self._compute_deltas(L_X, L_y, h, h_temp)
             # Add largest delta (improvement)
-            if max(deltas) > 0:
-                self.to_add['x' + str(idx_h)] = self.U_X_pool[np.argmax(
-                    deltas)].reshape(1, -1)
-                self.to_add['y' + str(idx_h)] = self.U_y_pool[np.argmax(
-                    deltas)].reshape(1, -1)
-                self.to_add['idx' + str(idx_h)] = self.U_idx_pool[np.argmax(
-                    deltas)]
+            sort_idxs = np.argsort(deltas)[::-1]  # max to min
+            max_idx = sort_idxs[0]
+            if max_idx in added_idxs:
+                max_idx = sort_idxs[1]
+            if deltas[max_idx] > 0:
+                added_idxs.append(max_idx)
+                x_u = self.U_X_pool[max_idx].reshape(1, -1)
+                y_u_hat = h.predict(x_u).reshape(1, -1)
+                self.to_add['x' + str(idx_h)] = x_u
+                self.to_add['y' + str(idx_h)] = y_u_hat
+                self.to_add['idx' + str(idx_h)] = self.U_idx_pool[max_idx]
 
     def _fit_and_evaluate(self, verbose):
         """
-        Fits h1 and h2 and evalutes metrics.
-        """
-        self._fit_regressors()
-        self._evaluate_metrics(verbose)
-
-    def _fit_regressors(self):
-        """
-        Fits h1 and h2.
+        Fits h1 and h2 and evaluates metrics.
         """
         self.h1.fit(self.L1_X, self.L1_y)
         self.h2.fit(self.L2_X, self.L2_y)
+        self._evaluate_metrics(verbose)
 
     def _get_pool(self):
         """
@@ -258,14 +225,13 @@ class Coreg():
         """
         Sets up metrics to be stored.
         """
-        initial_metrics = np.full((self.num_trials, self.max_iters), np.inf)
+        initial_metrics = np.full((self.num_trials, self.max_iters+1), np.inf)
         self.mses1_train = np.copy(initial_metrics)
         self.mses1_test = np.copy(initial_metrics)
         self.mses2_train = np.copy(initial_metrics)
         self.mses2_test = np.copy(initial_metrics)
         self.mses_train = np.copy(initial_metrics)
         self.mses_test = np.copy(initial_metrics)
-        self.original_indices = np.zeros((self.num_trials, 1000))
 
     def _remove_from_unlabeled(self):
         # Remove added examples from unlabeled
@@ -277,13 +243,40 @@ class Coreg():
         self.U_X = np.delete(self.U_X, to_remove, axis=0)
         self.U_y = np.delete(self.U_y, to_remove, axis=0)
 
+    def _split_data(self, random_state=-1, num_labeled=100, num_test=1000):
+        """
+        Shuffles data and splits it into train, test, and unlabeled sets.
+        """
+        if random_state >= 0:
+            self.X_shuffled, self.y_shuffled, self.shuffled_indices = shuffle(
+                self.X, self.y, range(self.y.size), random_state=random_state)
+        else:
+            self.X_shuffled = self.X[:]
+            self.y_shuffled = self.y[:]
+            self.shuffled_indices = range(self.y.size)
+        # Initial labeled, test, and unlabeled sets
+        test_end = num_labeled + num_test
+        self.X_labeled = self.X_shuffled[:num_labeled]
+        self.y_labeled = self.y_shuffled[:num_labeled]
+        self.X_test = self.X_shuffled[num_labeled:test_end]
+        self.y_test = self.y_shuffled[num_labeled:test_end]
+        self.X_unlabeled = self.X_shuffled[test_end:]
+        self.y_unlabeled = self.y_shuffled[test_end:]
+        # Up-to-date training sets and unlabeled set
+        self.L1_X = self.X_labeled[:]
+        self.L1_y = self.y_labeled[:]
+        self.L2_X = self.X_labeled[:]
+        self.L2_y = self.y_labeled[:]
+        self.U_X = self.X_unlabeled[:]
+        self.U_y = self.y_unlabeled[:]
+
     def _store_results(self, iteration):
         """
         Stores current MSEs.
         """
-        self.mses1_train[self.trial,iteration] = self.mse1_train
-        self.mses1_test[self.trial,iteration] = self.mse1_test
-        self.mses2_train[self.trial,iteration] = self.mse2_train
-        self.mses2_test[self.trial,iteration] = self.mse2_test
-        self.mses_train[self.trial,iteration] = self.mse_train
-        self.mses_test[self.trial,iteration] = self.mse_test
+        self.mses1_train[self.trial, iteration] = self.mse1_train
+        self.mses1_test[self.trial, iteration] = self.mse1_test
+        self.mses2_train[self.trial, iteration] = self.mse2_train
+        self.mses2_test[self.trial, iteration] = self.mse2_test
+        self.mses_train[self.trial, iteration] = self.mse_train
+        self.mses_test[self.trial, iteration] = self.mse_test
